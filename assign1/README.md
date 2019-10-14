@@ -2,6 +2,8 @@
 
 ## Test Case
 
+Last padding and length should be considered, and length must be known to perform the attack.
+
 ```Rust
 #[test]
 fn test_attack() {
@@ -11,9 +13,16 @@ fn test_attack() {
         v.push('a' as u8);
     }
     let orig_res = sm3_u32_to_u8(&sm3(&v));
+    v.push(0x80);
+    for _ in 0..61 {
+        v.push(0u8);
+    }
+    v.push(0x2);
+    v.push(0x0);
     v.push('b' as u8);
+    dbg!(v.clone());
     let real_res = sm3_u32_to_u8(&sm3(&v));
-    let attack_res = expansion_attack(&orig_res, &['b' as u8]);
+    let attack_res = expansion_attack(&orig_res, &['b' as u8], 64 + 64 + 1);
     assert_eq!(encode(real_res), encode(attack_res));
 }
 ```
