@@ -18,6 +18,6 @@ fn main() {
         return;
     }
 
-    let new_hash = sm3::expansion_attack(&hash_vec, &extra.bytes().collect::<Vec<u8>>());
-    println!("{}", encode(&new_hash));
+    //let new_hash = sm3::expansion_attack(&hash_vec, &extra.bytes().collect::<Vec<u8>>());
+    //println!("{}", encode(&new_hash));
 }

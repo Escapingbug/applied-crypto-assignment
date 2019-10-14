@@ -43,14 +43,14 @@ pub fn sm3_u32_to_u8(m: &[u32]) -> Vec<u8> {
     v
 }
 
-fn pad(m: &[u8]) -> [u32; 16] {
-    let l = m.len() as u64;
+fn pad(m: &[u8], l: u64) -> [u32; 16] {
     let mut m_prime = [0u32; 16];
     let mut used = 0;
     for message in m.iter() {
         m_prime[used / 32] <<= 8;
         m_prime[used / 32] |= (*message) as u32;
         used += 8;
+        println!("mix {} = {}", *message, m_prime[used / 32]);
     }
 
     if used % 32 == 0 {
@@ -60,7 +60,9 @@ fn pad(m: &[u8]) -> [u32; 16] {
         m_prime[used / 32] |= 1 << (31 - (used % 32));
     }
 
-    let bits_len = l * 8;
+    let bits_len = (l * 8);
+
+    dbg!(bits_len);
 
     m_prime[14] = (bits_len >> 32) as u32;
     m_prime[15] = bits_len as u32;
@@ -144,6 +146,8 @@ fn compression_function(v: &[u32], ei: &[u32]) -> [u32; 8] {
             .0
             .rotate_left(7);
         let ss2 = ss1 ^ a.rotate_left(12);
+        println!("ss1 {} {}", j, ss1);
+        println!("ss2 {} {}", j, ss2);
         let tt1 = ff(j)(a, b, c)
             .overflowing_add(d)
             .0
@@ -189,7 +193,7 @@ fn compression_function(v: &[u32], ei: &[u32]) -> [u32; 8] {
     ]
 }
 
-fn split_to_blocks(m: &[u8]) -> Vec<[u32; 16]> {
+fn split_to_blocks(m: &[u8], require_len: Option<u64>) -> Vec<[u32; 16]> {
     let l = m.len();
     let mut blocks = Vec::new();
     for i in 0..(l / 64) {
@@ -197,24 +201,38 @@ fn split_to_blocks(m: &[u8]) -> Vec<[u32; 16]> {
         // A B C D E F G H ...
         // [A B C D] [E F G H] ...
         for j in 0..64 {
-            block[j / 4] |= (m[i * 64 + j] as u32) << ((j % 4) * 8);
+            block[j / 4] <<= 8;
+            block[j / 4] |= m[i * 64 + j] as u32;
         }
         blocks.push(block);
     }
     if l % 64 != 0 {
-        blocks.push(pad(&m[(l - (l % 64))..]));
+        if let Some(req_l) = require_len {
+            blocks.push(pad(&m[(l - (l % 64))..], req_l as u64));
+        } else {
+            blocks.push(pad(&m[(l - (l % 64))..], l as u64));
+        }
+    } else {
+        if let Some(req_l) = require_len {
+            blocks.push(pad(&[], req_l as u64));
+        } else {
+            blocks.push(pad(&[], l as u64));
+        }
     }
     blocks
 }
 
 #[cfg(test)]
 fn sm3(m: &[u8]) -> [u32; 8] {
-    let blocks = split_to_blocks(m);
+    let blocks = split_to_blocks(m, None);
+    println!("blocks = {:?}", blocks);
     let n = blocks.len();
     let mut v = [
         0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d,
         0xb0fb0e4e,
     ];
+
+    dbg!(n);
 
     for i in 0..=(n - 1) {
         let e = message_expansion(&blocks[i]);
@@ -224,8 +242,8 @@ fn sm3(m: &[u8]) -> [u32; 8] {
     v
 }
 
-pub fn expansion_attack(original_hash: &[u8], extra: &[u8]) -> Vec<u8> {
-    let expand_messages = split_to_blocks(extra);
+pub fn expansion_attack(original_hash: &[u8], extra: &[u8], l: u64) -> Vec<u8> {
+    let expand_messages = split_to_blocks(extra, Some(l));
     let hash_blocks = sm3_u8_to_u32(original_hash);
     let mut v = [
         hash_blocks[0],
@@ -237,6 +255,7 @@ pub fn expansion_attack(original_hash: &[u8], extra: &[u8]) -> Vec<u8> {
         hash_blocks[6],
         hash_blocks[7],
     ];
+    dbg!(expand_messages.clone());
     for message in expand_messages.iter() {
         let e_i = message_expansion(message);
         v = compression_function(&v, &e_i);
@@ -261,6 +280,24 @@ fn test_sm3() {
         encode(&res),
         "a50f9a8c6db698761f811c7f0d0d40c3fe58d193fd7b9a91588ddd903f79e2bb"
     );
+    let mut v = Vec::new();
+    for _ in 0..30 {
+        v.push('a' as u8);
+    }
+    let res = sm3_u32_to_u8(&sm3(&v));
+    assert_eq!(
+        encode(&res),
+        "a30df03245b0719713bd6f3bab00396d0998dfb0f19f1734dbb48b206d4f73a6"
+    );
+    let mut v = Vec::new();
+    for _ in 0..64 {
+        v.push('a' as u8);
+    }
+    let res = sm3_u32_to_u8(&sm3(&v));
+    assert_eq!(
+        encode(&res),
+        "616ec433c359e7c2b19f360e2b8f2a1b6e9ed76b8dc1a7d207b31a5341c611e9"
+    );
 }
 
 #[test]
@@ -271,8 +308,15 @@ fn test_attack() {
         v.push('a' as u8);
     }
     let orig_res = sm3_u32_to_u8(&sm3(&v));
+    v.push(0x80);
+    for _ in 0..61 {
+        v.push(0u8);
+    }
+    v.push(0x2);
+    v.push(0x0);
     v.push('b' as u8);
+    dbg!(v.clone());
     let real_res = sm3_u32_to_u8(&sm3(&v));
-    let attack_res = expansion_attack(&orig_res, &['b' as u8]);
+    let attack_res = expansion_attack(&orig_res, &['b' as u8], 64 + 64 + 1);
     assert_eq!(encode(real_res), encode(attack_res));
 }
