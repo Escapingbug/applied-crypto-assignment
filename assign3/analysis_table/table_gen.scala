@@ -1,6 +1,7 @@
 import scala.io.Source
 import java.io.File
 import java.io.PrintWriter
+import scala.math._
 import scala.collection.mutable.ArrayBuffer
 
 object Main {
@@ -49,8 +50,9 @@ object Main {
     if (sbox.length > 16) {
       throw new IllegalArgumentException("sbox cannot have more than 32 bits")
     }
-    val low = in & (sbox.length - 1)
-    val high = in >> (sbox.length / 2)
+    val maskBits = (log(sbox.length) / log(2)).toInt
+    val low = in & ((1 << maskBits) - 1)
+    val high = in >> maskBits
     sbox(low)(high)
   }
 
